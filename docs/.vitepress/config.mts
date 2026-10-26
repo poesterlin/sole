@@ -33,7 +33,8 @@ export default defineConfig({
         items: [
           { text: 'First playable vibe', link: '/guides/first-play' },
           { text: 'Embedding workers', link: '/guides/worker' },
-          { text: 'Home Assistant buttons', link: '/guides/home-assistant' }
+          { text: 'Home Assistant buttons', link: '/guides/home-assistant' },
+          { text: 'Home Assistant player card', link: '/guides/home-assistant-card' }
         ]
       },
       {

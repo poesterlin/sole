@@ -3,6 +3,9 @@
 Home Assistant can call Sole's playback API using `rest_command`. Sole generates
 the mix and plays it through Music Assistant; Home Assistant supplies the trigger.
 
+For play, pause, next, and volume controls with Sole's styling, see the
+[Home Assistant player card](/guides/home-assistant-card).
+
 ## 1. Create a playback key
 
 In Sole, open **Manage → API keys** and create an **external playback** key named
