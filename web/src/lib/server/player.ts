@@ -7,8 +7,22 @@
  * views include every Music Assistant player.
  */
 
+import { eq } from 'drizzle-orm';
+import { getClusterName } from './active-clusters';
+import { db } from './db';
 import { withMa } from './ma-client';
 import { getPlaybackPlayer } from './playback-settings';
+import { withPlaybackLock } from './playback-lock';
+import { disableRadio, getRadioSession } from './radio-store';
+import { trackTable } from './schema';
+
+export type RadioStatus = { enabled: boolean; message: string | null; clusterIds: number[] };
+
+function radioStatus(session: Awaited<ReturnType<typeof getRadioSession>>): RadioStatus | null {
+	return session
+		? { enabled: session.enabled, message: session.message, clusterIds: session.clusterIds }
+		: null;
+}
 
 export type PlayerTrack = {
 	uri: string;
@@ -17,6 +31,10 @@ export type PlayerTrack = {
 	album: string;
 	duration: number | null;
 	image: string | null;
+	/** Live cluster for the track, when the library still holds an assignment. */
+	clusterId?: number | null;
+	/** Display name for that cluster, resolved from the active naming run. */
+	clusterName?: string | null;
 };
 
 export type PlayerState = {
@@ -31,6 +49,7 @@ export type PlayerState = {
 	repeat: string | null;
 	currentIndex: number | null;
 	track: PlayerTrack | null;
+	radio?: RadioStatus | null;
 };
 
 export async function preferredPlayerName(): Promise<string | null> {
@@ -107,6 +126,24 @@ function toTrack(cm: any): PlayerTrack | null {
 	};
 }
 
+/**
+ * The cluster a playing URI belongs to, or null when it was never indexed.
+ * Playback must keep working when the database is unavailable, so this is
+ * deliberately best-effort — the link simply does not appear.
+ */
+async function clusterIdForUri(uri: string): Promise<number | null> {
+	try {
+		const [row] = await db
+			.select({ clusterId: trackTable.clusterId })
+			.from(trackTable)
+			.where(eq(trackTable.uri, uri))
+			.limit(1);
+		return typeof row?.clusterId === 'number' && row.clusterId >= 0 ? row.clusterId : null;
+	} catch {
+		return null;
+	}
+}
+
 type QueueTarget = { player: any; queueId: string };
 
 /** Resolve one player's active queue id. */
@@ -147,6 +184,11 @@ export async function getPlayerState(): Promise<PlayerState | null> {
 			queue = null;
 		}
 		const cm = player.current_media;
+		const track = toTrack(cm);
+		if (track) {
+			track.clusterId = await clusterIdForUri(track.uri);
+			if (track.clusterId !== null) track.clusterName = await getClusterName(track.clusterId);
+		}
 		return {
 			playerId: String(player.player_id),
 			playerName: String(player.name ?? player.player_id),
@@ -158,9 +200,63 @@ export async function getPlayerState(): Promise<PlayerState | null> {
 			shuffle: typeof queue?.shuffle_enabled === 'boolean' ? queue.shuffle_enabled : null,
 			repeat: queue?.repeat_mode ? String(queue.repeat_mode) : null,
 			currentIndex: typeof queue?.current_index === 'number' ? queue.current_index : null,
-			track: toTrack(cm)
+			track,
+			radio: radioStatus(await getRadioSession(queueId))
 		};
 	});
+}
+
+export async function getPlaybackTarget(
+	playerId?: string
+): Promise<{ playerId: string; queueId: string }> {
+	return withMa(async (call) => {
+		const target = await resolveTarget(call, playerId);
+		return { playerId: String(target.player.player_id), queueId: target.queueId };
+	});
+}
+
+/** Fail closed on unavailable queues: radio must never refill a guessed empty queue. */
+export async function getRadioQueue(playerId: string, queueId: string): Promise<PlayerQueue> {
+	return withMa(async (call) => {
+		const target = await resolveTarget(call, playerId);
+		if (target.queueId !== queueId) throw new Error('Player active queue changed');
+		// Unlike the display snapshot, errors here must propagate.
+		const queue = await call('player_queues/get', { queue_id: queueId });
+		if (!queue) throw new Error('Queue unavailable');
+		const currentIndex = typeof queue.current_index === 'number' ? queue.current_index : -1;
+		const result = await call('player_queues/items', {
+			queue_id: queueId,
+			offset: Math.max(0, currentIndex),
+			limit: 102
+		});
+		if (!Array.isArray(result)) throw new Error('Queue items unavailable');
+		return {
+			queueId,
+			playerIds: [playerId],
+			playerNames: [String(target.player.name ?? playerId)],
+			state: String(queue.state ?? target.player.state ?? 'idle'),
+			currentIndex,
+			currentTrack: currentIndex >= 0 && result[0] ? toQueueTrack(result[0]) : null,
+			tracks: (currentIndex >= 0 ? result.slice(1) : result).map(toQueueTrack),
+			hasMore: result.length >= 102
+		};
+	});
+}
+
+/** Call under withPlaybackLock when mutating a radio queue. ADD never replaces playback. */
+export async function playQueueUris(
+	queueId: string,
+	uris: string[],
+	option: 'replace' | 'add'
+): Promise<void> {
+	if (!uris.length) return;
+	await withMa((call) =>
+		call('player_queues/play_media', {
+			queue_id: queueId,
+			media: uris,
+			option
+		})
+	);
 }
 
 export type PlayerAction = 'play' | 'pause' | 'play_pause' | 'stop' | 'next' | 'previous' | 'clear';
@@ -183,6 +279,7 @@ export type PlayerQueue = {
 	currentTrack: UpNextTrack | null;
 	tracks: UpNextTrack[];
 	hasMore: boolean;
+	radio?: RadioStatus | null;
 };
 
 export type QueueSnapshot = {
@@ -282,7 +379,10 @@ export async function getQueues(limit = 30): Promise<QueueSnapshot> {
 		}
 
 		const queues = await Promise.all(
-			[...grouped.values()].map((target) => loadPlayerQueue(call, target, itemLimit))
+			[...grouped.values()].map(async (target) => ({
+				...(await loadPlayerQueue(call, target, itemLimit)),
+				radio: radioStatus(await getRadioSession(target.queueId))
+			}))
 		);
 		const stateOrder: Record<string, number> = { playing: 0, paused: 1, buffering: 2 };
 		queues.sort(
@@ -326,7 +426,10 @@ export async function playerControl(action: PlayerAction): Promise<void> {
 				: `player_queues/${action}`;
 	return withMa(async (call) => {
 		const { queueId } = await resolveTarget(call);
-		await call(cmd, { queue_id: queueId });
+		await withPlaybackLock(queueId, async () => {
+			if (action === 'stop' || action === 'clear') await disableRadio(queueId);
+			await call(cmd, { queue_id: queueId });
+		});
 	});
 }
 
@@ -362,20 +465,23 @@ export async function playUris(
 	if (!uris.length) return;
 	return withMa(async (call) => {
 		const { queueId } = await resolveTarget(call, opts.playerId);
-		await call('player_queues/play_media', {
-			queue_id: queueId,
-			media: uris,
-			option: 'replace'
-		});
-		if (opts.shuffle !== undefined) {
-			try {
-				await call('player_queues/shuffle', {
-					queue_id: queueId,
-					shuffle_enabled: opts.shuffle
-				});
-			} catch {
-				// shuffle is best-effort
+		await withPlaybackLock(queueId, async () => {
+			await disableRadio(queueId);
+			await call('player_queues/play_media', {
+				queue_id: queueId,
+				media: uris,
+				option: 'replace'
+			});
+			if (opts.shuffle !== undefined) {
+				try {
+					await call('player_queues/shuffle', {
+						queue_id: queueId,
+						shuffle_enabled: opts.shuffle
+					});
+				} catch {
+					// shuffle is best-effort
+				}
 			}
-		}
+		});
 	});
 }

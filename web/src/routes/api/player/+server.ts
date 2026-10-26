@@ -23,7 +23,7 @@ export const GET: RequestHandler = async () => {
 	try {
 		const state = await getPlayerState();
 		if (!state) return Response.json({ success: false, error: 'No player found' }, { status: 404 });
-		return Response.json({ success: true, ...state });
+		return Response.json({ success: true, ...state }, { headers: { 'Cache-Control': 'no-store' } });
 	} catch (error) {
 		console.error('player state failed:', error);
 		return Response.json({ success: false, error: String(error) }, { status: 500 });

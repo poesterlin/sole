@@ -97,11 +97,11 @@
 		try {
 			const { ok, data } = await post<{ tracks?: unknown[]; error?: string }>(
 				'/api/play-vibe',
-				chosen ? { scheduleId: chosen.id } : {}
+				chosen ? { scheduleId: chosen.id, continuous: true } : { continuous: true }
 			);
 			if (ok) {
 				toastStore.show(
-					`Playing ${chosen?.name ?? 'your picks'} (${data.tracks?.length ?? 0} tracks)`
+					`Radio started ∞ · ${chosen?.name ?? 'your picks'}`
 				);
 				await onPlay();
 			} else {

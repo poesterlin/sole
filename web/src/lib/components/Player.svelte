@@ -18,7 +18,10 @@
 		IconDeviceSpeaker,
 		IconHeartFilled,
 		IconArrowsShuffle,
-		IconMusic
+		IconBan,
+		IconInfinity,
+		IconMusic,
+		IconSparkles
 	} from '@tabler/icons-svelte';
 
 	type Track = {
@@ -28,11 +31,15 @@
 		album: string;
 		duration: number | null;
 		image: string | null;
+		clusterId?: number | null;
+		clusterName?: string | null;
 	};
 
 	type State = {
 		playerId: string;
 		playerName: string;
+		queueId?: string;
+		radio?: { enabled: boolean; message: string | null; clusterIds: number[] } | null;
 		state: string;
 		volumeLevel: number | null;
 		muted: boolean | null;
@@ -169,12 +176,40 @@
 		}
 	}
 
+	async function permaSkip() {
+		const track = player?.track;
+		if (!track || busy !== null) return;
+		busy = 'perma-skip';
+		try {
+			const { ok } = await post('/track/skip', { uri: track.uri });
+			if (!ok) {
+				toastStore.show('Could not skip this track permanently.');
+				return;
+			}
+			toastStore.show(`Skipped “${track.title}” forever`);
+			// Move on immediately: adding it to the exclusion list alone would
+			// leave the unwanted track playing until it finished.
+			const { ok: advanced, data } = await post<State & { success: boolean }>('/api/player', {
+				action: 'next'
+			});
+			if (advanced && data && 'state' in data) {
+				player = data;
+				nowPlayingStore.setPlayer(data);
+				tick = 0;
+			}
+		} finally {
+			busy = null;
+			onQueueChange?.();
+		}
+	}
+
 	async function startMix() {
 		if (busy !== null) return;
 		busy = 'mix';
 		try {
 			const { ok, data } = await post<{ error?: string }>('/api/play-vibe', {
-				useSchedule: true
+				useSchedule: true,
+				continuous: true
 			});
 			if (ok) {
 				await refresh();
@@ -185,6 +220,19 @@
 		} finally {
 			busy = null;
 		}
+	}
+
+	async function toggleRadio() {
+		if (!player || busy !== null) return;
+		busy = 'radio';
+		try {
+			const stopping = player.radio?.enabled;
+			const { ok, data } = await post<{ error?: string }>(stopping ? '/api/radio' : `/api/play-vibe?playerId=${encodeURIComponent(player.playerId)}`,
+				stopping ? { queueId: player.queueId } : { useSchedule: true, continuous: true });
+			if (!ok) toastStore.show(data.error ?? 'Could not change radio.');
+			await refresh();
+			onQueueChange?.();
+		} finally { busy = null; }
 	}
 
 	let volumeTimer: ReturnType<typeof setTimeout> | null = null;
@@ -234,6 +282,29 @@
 	});
 </script>
 
+{#snippet radioControl()}
+	{#if player}
+		<button
+			class="hover:bg-cream/10 focus-visible:outline-cream inline-flex min-h-10 items-center gap-2 rounded-full px-3 transition focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-40 {player.radio?.enabled
+				? 'text-accent'
+				: 'text-cream/60'}"
+			disabled={busy !== null}
+			aria-pressed={player.radio?.enabled ?? false}
+			title={player.radio?.enabled
+				? 'Stop adding tracks; keep the queue playing'
+				: 'Keep adding similar tracks from your current scheduled or saved vibes'}
+			onclick={toggleRadio}
+		>
+			{#if busy === 'radio'}
+				<IconLoader2 size={18} class="animate-spin" aria-hidden="true" />
+			{:else}
+				<IconInfinity size={18} aria-hidden="true" />
+			{/if}
+			{busy === 'radio' ? 'Updating…' : player.radio?.enabled ? 'Continuous on' : 'Continuous'}
+		</button>
+	{/if}
+{/snippet}
+
 <section
 	class="bg-ink text-cream ring-ink/20 shadow-ink/30 relative isolate overflow-hidden rounded-[2rem] shadow-2xl ring-1"
 	aria-label="Now playing"
@@ -265,7 +336,6 @@
 				<span class="text-cream/45 normal-case">{player.playerName}</span>
 			{/if}
 		</p>
-
 		<div class="mt-8 grid items-center gap-10 lg:grid-cols-[auto_1fr] lg:gap-16">
 			<!-- Sleeve and record. The record slides out of the sleeve when it plays. -->
 			<div class="flex justify-center lg:justify-start transition-transform duration-1000 ease-in-out motion-reduce:transition-none {player?.track ? '' : 'lg:translate-x-[65%]'}">
@@ -354,6 +424,16 @@
 					</h2>
 					<p class="text-cream/90 mt-4 truncate text-xl font-bold">{player.track.artist}</p>
 					<p class="text-cream/50 mt-1 truncate italic">{player.track.album}</p>
+					{#if player.track.clusterId !== null && player.track.clusterId !== undefined}
+						<a
+							href={`/vibe?tab=browse&cluster=${player.track.clusterId}`}
+							class="text-cream/55 hover:text-cream focus-visible:outline-cream mt-4 inline-flex items-center gap-1.5 rounded-full text-xs font-bold tracking-[0.18em] uppercase transition hover:bg-white/10 focus-visible:outline-2 focus-visible:outline-offset-2"
+							title="Open this track's vibe"
+						>
+							<IconSparkles size={14} aria-hidden="true" />
+							{player.track.clusterName ?? `Cluster ${player.track.clusterId}`}
+						</a>
+					{/if}
 
 					<!-- progress (click to seek) -->
 					<div class="mt-8">
@@ -459,6 +539,19 @@
 							Stop
 						</button>
 						<button
+							class="text-cream/60 hover:bg-cream/10 hover:text-cream focus-visible:outline-cream inline-flex min-h-10 items-center gap-2 rounded-full px-3 transition focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-40"
+							disabled={busy !== null}
+							onclick={permaSkip}
+							title="Skip this track and never play it again"
+						>
+							{#if busy === 'perma-skip'}
+								<IconLoader2 size={18} class="animate-spin" aria-hidden="true" />
+							{:else}
+								<IconBan size={18} aria-hidden="true" />
+							{/if}
+							Perma skip
+						</button>
+						<button
 							class="hover:bg-cream/10 focus-visible:outline-cream inline-flex min-h-10 items-center gap-2 rounded-full px-3 transition focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-40 {player.shuffle ? 'text-accent' : 'text-cream/60'}"
 							disabled={busy !== null}
 							onclick={toggleShuffle}
@@ -467,7 +560,11 @@
 							<IconArrowsShuffle size={18} aria-hidden="true" />
 							Shuffle
 						</button>
+						{@render radioControl()}
 					</div>
+					{#if player.radio?.message}
+						<p class="text-cream/50 mt-2 text-xs" role="status">{player.radio.message}</p>
+					{/if}
 				</div>
 			{:else}
 				<div class="min-w-0 text-center lg:text-left">
@@ -486,6 +583,14 @@
 						<p class="text-cream/65 mt-4 text-lg">
 							{playing ? 'Track details are not available yet.' : 'Check the Music Assistant connection.'}
 						</p>
+					{/if}
+					{#if player && !player.track}
+						<div class="mt-6 flex flex-wrap items-center justify-center gap-3 lg:justify-start">
+							{@render radioControl()}
+							{#if player.radio?.message}
+								<span class="text-cream/50 text-xs" role="status">{player.radio.message}</span>
+							{/if}
+						</div>
 					{/if}
 				</div>
 			{/if}

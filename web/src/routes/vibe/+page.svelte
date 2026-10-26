@@ -14,13 +14,29 @@
 	type Tab = 'mix' | 'browse' | 'schedule';
 	let tab = $state<Tab>(untrack(() => {
 		const requested = page.url.searchParams.get('tab');
-		return requested === 'browse' || requested === 'schedule' ? requested : 'mix';
+		return requested === 'mix' || requested === 'schedule' ? requested : 'browse';
 	}));
+	// Browse is the default view, so a cluster link can point at the tab
+	// directly and still land on the right sleeve.
+	const focusClusterId = $derived.by(() => {
+		const raw = page.url.searchParams.get('cluster');
+		if (!raw) return null;
+		const parsed = Number(raw);
+		return Number.isInteger(parsed) && parsed >= 0 ? parsed : null;
+	});
+
+	// Links elsewhere on the site point at `?tab=browse&cluster=…`. SvelteKit
+	// keeps this component mounted, so honour a tab change on navigation too.
+	$effect(() => {
+		const requested = page.url.searchParams.get('tab');
+		if (requested === 'mix' || requested === 'browse' || requested === 'schedule') tab = requested;
+	});
 
 	let vibeSelection = $state(new SvelteSet<number>(untrack(() => data.vibeClusterIds)));
 	let schedules = $state<VibeSchedule[]>(untrack(() => data.vibeSchedules));
 	let activeSchedule = $state<VibeSchedule | null>(untrack(() => data.activeSchedule));
 	let saveStatus = $state('');
+	let playing = $state(false);
 	let filter = $state('');
 	let clusterNames = $state<Record<number, string>>(untrack(() => data.clusterNames));
 	$effect(() => { clusterNames = data.clusterNames; });
@@ -29,8 +45,8 @@
 	const clusterIds = $derived(data.availableClusterIds);
 
 	const TABS: Array<{ id: Tab; label: string }> = [
-		{ id: 'mix', label: 'Mix' },
 		{ id: 'browse', label: 'Browse' },
+		{ id: 'mix', label: 'Mix' },
 		{ id: 'schedule', label: 'Schedule' }
 	];
 
@@ -83,15 +99,19 @@
 		saveStatus = ok ? `Saved ${json.clusterIds.length} picks` : 'Save failed';
 	}
 
-	async function play() {
+	async function play(continuous = false) {
+		if (playing) return;
 		if (!selection.length) {
 			toastStore.show('Pick at least one cluster');
 			return;
 		}
-		const { ok, data: json } = await post<{ tracks?: unknown[] }>('/api/play-vibe', {
-			clusterIds: selection
-		});
-		if (ok) toastStore.show(`Playing ${(json.tracks ?? []).length} tracks`);
+		playing = true;
+		try {
+			const { ok, data: json } = await post<{ tracks?: unknown[]; error?: string }>('/api/play-vibe', {
+				clusterIds: selection, continuous
+			});
+			toastStore.show(ok ? (continuous ? 'Vibe radio started ∞' : `Playing ${(json.tracks ?? []).length} tracks`) : (json.error ?? 'Could not start playback.'));
+		} finally { playing = false; }
 	}
 
 </script>
@@ -179,8 +199,13 @@
 		>
 		<button
 			class="rounded-xl bg-green-600 px-5 py-2.5 font-semibold text-white hover:bg-green-700"
-			onclick={play}>Play selection</button
+			disabled={playing}
+			onclick={() => play()}>Play selection</button
 		>
+		<button
+			class="rounded-xl bg-green-600 px-5 py-2.5 font-semibold text-white hover:bg-green-700 disabled:opacity-50"
+			disabled={playing}
+			onclick={() => play(true)}>{playing ? 'Starting…' : 'Start radio ∞'}</button>
 		{#if saveStatus}<span class="text-sm text-gray-500">{saveStatus}</span>{/if}
 	</div>
 {:else if tab === 'browse'}
@@ -190,6 +215,7 @@
 		covers={data.covers}
 		trackCounts={data.trackCounts}
 		namedIds={data.namedIds}
+		{focusClusterId}
 	/>
 {:else}
 	<VibeScheduleEditor

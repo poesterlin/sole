@@ -41,11 +41,16 @@ mock.module('../src/lib/server/schema', () => ({
 	vibeStateTable: { kind: 'state', key: 'key' },
 	vibeScheduleTable: { kind: 'schedule', id: 'id' },
 	trackTable: {},
-	likedSongsTable: {}
+	likedSongsTable: {},
+	radioSessionsTable: {}
 }));
 const store = await import('../src/lib/server/vibe-store');
 mock.module('$lib/server/db', () => ({ db: database }));
-mock.module('$lib/server/schema', () => ({ trackTable: {}, likedSongsTable: {} }));
+mock.module('$lib/server/schema', () => ({
+	trackTable: {},
+	likedSongsTable: {},
+	radioSessionsTable: {}
+}));
 mock.module('$lib/server/vibe-store', () => store);
 mock.module('$lib/server/active-clusters', () => ({
 	getActiveClusterMetadata: async () => ({ names: {} })

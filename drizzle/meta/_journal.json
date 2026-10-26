@@ -141,6 +141,13 @@
       "when": 1790876400000,
       "tag": "0019_playback_settings",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1791043200000,
+      "tag": "0020_continuous_playback",
+      "breakpoints": true
     }
   ]
 }

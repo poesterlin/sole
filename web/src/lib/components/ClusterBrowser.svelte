@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { IconWand } from '@tabler/icons-svelte';
 	import TrackList from '$lib/components/TrackList.svelte';
 	import ClusterAtlas from '$lib/components/ClusterAtlas.svelte';
@@ -15,7 +16,8 @@
 		clusterNames = $bindable(),
 		covers = {},
 		trackCounts = {},
-		namedIds = []
+		namedIds = [],
+		focusClusterId = null
 	}: {
 		clusters: Array<{
 			clusterId: number;
@@ -28,6 +30,8 @@
 		covers?: Record<number, { primary: string | null; secondary: string | null }>;
 		trackCounts?: Record<number, number>;
 		namedIds?: number[];
+		/** A cluster linked from elsewhere, opened once the grid is on screen. */
+		focusClusterId?: number | null;
 	} = $props();
 
 	let naming = $state<number | null>(null);
@@ -47,7 +51,7 @@
 	}
 
 	/** Preview a random sample without leaving the grid. */
-	async function sample(clusterId: number) {
+	async function sample(clusterId: number, reveal = true) {
 		loading = true;
 		playing = false;
 		playingClusterId = clusterId;
@@ -58,6 +62,17 @@
 		);
 		if (ok) tracks = json.tracks;
 		loading = false;
+		if (reveal) {
+			// The sample lives below the grid. On a desktop-sized library that is
+			// several rows away, so bring it into view instead of leaving a click
+			// that appears to do nothing.
+			requestAnimationFrame(() =>
+				document.getElementById('cluster-preview')?.scrollIntoView({
+					behavior: 'smooth',
+					block: 'start'
+				})
+			);
+		}
 	}
 
 	async function playSample() {
@@ -71,6 +86,21 @@
 	function applyName(clusterId: number, name: string) {
 		clusterNames = { ...clusterNames, [clusterId]: name.trim() || `Cluster ${clusterId}` };
 	}
+
+	// A link from the player focuses its cluster once Browse is on screen.
+	$effect(() => {
+		const id = focusClusterId;
+		if (id === null || !clusters.some((cluster) => cluster.clusterId === id)) return;
+		// Sampling writes preview state; keep those writes out of the effect so
+		// only a new focus link re-runs it.
+		untrack(() => void sample(id, false));
+		// Wait a frame so the grid is laid out before bringing the sleeve into view.
+		requestAnimationFrame(() =>
+			document
+				.getElementById(`cluster-tile-${id}`)
+				?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+		);
+	});
 
 	/**
 	 * Name every cluster that has no human name yet, from its dominant artists.
@@ -123,6 +153,7 @@
 			covers={covers[c.clusterId] ?? { primary: null, secondary: null }}
 			named={named.has(c.clusterId)}
 			playing={playingClusterId === c.clusterId && tracks.length > 0}
+			selected={focusClusterId === c.clusterId}
 			onselect={(id) => (naming = id)}
 			onpreview={sample}
 		/>
@@ -136,7 +167,7 @@
 </div>
 
 {#if title}
-	<section class="animate-rise mt-8">
+	<section id="cluster-preview" class="animate-rise mt-8 scroll-mt-28">
 		<div class="mb-3 flex flex-wrap items-center justify-between gap-3">
 			<h2 class="font-display text-xl font-black">{title}</h2>
 			{#if tracks.length > 0}

@@ -14,6 +14,18 @@ import {
 
 const authCascade = { onDelete: 'cascade', onUpdate: 'cascade' } as const;
 
+export const radioSessionsTable = pgTable('radio_sessions', {
+	queueId: text('queue_id').primaryKey(),
+	playerId: text('player_id').notNull(),
+	enabled: boolean('enabled').notNull().default(false),
+	clusterIds: jsonb('cluster_ids').$type<number[]>().notNull(),
+	seedUris: jsonb('seed_uris').$type<string[]>().notNull(),
+	recentUris: jsonb('recent_uris').$type<string[]>().notNull(),
+	queueItemIds: jsonb('queue_item_ids').$type<string[]>().notNull(),
+	message: text('message'),
+	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).defaultNow().notNull()
+});
+
 export const playbackSettingsTable = pgTable('playback_settings', {
 	id: integer('id').primaryKey().default(1),
 	playerId: text('player_id'),

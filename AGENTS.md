@@ -7,6 +7,11 @@
 - Generated images: `cd assets && bun run check` (fails when a committed asset no longer matches its master; rebuild with `bun run build`). Replacing the artwork means rebuilding the knockout master first with `python3 assets/make-alpha.py`, which needs Pillow — see `assets/README.md`
 - Native clustering: `cargo test --manifest-path clustering-rs/Cargo.toml --locked`
 - Cluster naming integration: migrate a disposable PostgreSQL database, then `cd web && TEST_DATABASE_URL=<disposable-url> bun test src/lib/server/cluster-naming.integration.test.ts`
+- Radio integration: after migrating a disposable PostgreSQL database, run
+  `cd web && TEST_DATABASE_URL=<disposable-url> bun test src/lib/server/radio.integration.test.ts`
+  and `TEST_DATABASE_URL=<disposable-url> bun test src/lib/server/playback-settings.integration.test.ts`
+  separately. The radio test mocks recommendation output and uses a fake MA
+  WebSocket server; its mocks must not leak into other test files.
 - Python worker tests: build `embeddings/Dockerfile`, then run `unittest discover` from `embeddings/tests`
 - Fresh database: provide a disposable pgvector URL and run `bun run db:migrate && FRESH_DATABASE=1 bun run test:fresh-db`
 - Create/reset an account: `bun run auth:create-user --username <name>`
@@ -37,6 +42,11 @@ External PostgreSQL installations can leave that profile disabled and provide
   tracking `1`. There is no leader election, so a
   second web replica would run every job; the jobs are idempotent, so that
   wastes work rather than corrupting anything.
+- Continuous vibe radio also runs in the web process, checking active sessions
+  every 15 seconds. Sessions and bounded recent-track history live in
+  `radio_sessions` (migration `0020_continuous_playback`). Keep one web replica:
+  radio queue mutation locks are process-local. Radio refills append to the pinned
+  MA queue and never resume paused/idle players.
 - `embedding`: bounded/manual Python worker runs.
 - `clustering`: native Rust benchmark, split, apply, and rollback jobs.
 

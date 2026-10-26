@@ -38,13 +38,26 @@
 	const turn = $derived(playing ? 'animate-vinyl' : 'group-hover:animate-vinyl-idle');
 </script>
 
-<button
-	type="button"
-	class="group relative block w-full cursor-pointer text-left [perspective:900px]"
-	onclick={() => onselect(clusterId)}
-	{disabled}
-	aria-label={playable ? `Play ${name}` : undefined}
+<div
+	id={`cluster-tile-${clusterId}`}
+	class="group relative block w-full text-left [perspective:900px] {disabled
+		? 'cursor-default opacity-60'
+		: 'cursor-pointer'}"
+	role="button"
+	tabindex={disabled ? -1 : 0}
+	aria-label={playable ? `Play ${name}` : `Open ${name}`}
 	aria-pressed={playable ? undefined : selected}
+	aria-disabled={disabled || undefined}
+	onclick={() => {
+		if (!disabled) onselect(clusterId);
+	}}
+	onkeydown={(event) => {
+		if (disabled) return;
+		if (event.key === 'Enter' || event.key === ' ') {
+			event.preventDefault();
+			onselect(clusterId);
+		}
+	}}
 >
 	<!--
 		One object, not two. The cover and the label are a single card with a fold
@@ -215,28 +228,26 @@
 						><IconPlayerPlayFilled size={11} /> {selected ? 'Starting…' : 'Play'}</span
 					>
 				{:else if onpreview}
-					<span
-						role="button"
-						tabindex="0"
+					<button
+						type="button"
 						class="text-faded hover:bg-ink/5 hover:text-ink inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] font-bold transition"
-						onclick={(e) => {
-							e.stopPropagation();
+						onclick={(event) => {
+							// Do not let the sleeve's own click open the details panel.
+							event.stopPropagation();
 							onpreview(clusterId);
 						}}
-						onkeydown={(e) => {
-							if (e.key === 'Enter' || e.key === ' ') {
-								e.preventDefault();
-								e.stopPropagation();
-								onpreview(clusterId);
-							}
+						onkeydown={(event) => {
+							// Enter and Space activate the button natively; stop the
+							// card's key handler from also treating them as "open".
+							event.stopPropagation();
 						}}
 						aria-label="Preview a sample from cluster {clusterId}"
 					>
 						<IconPlayerPlayFilled size={11} />
 						Preview
-					</span>
+					</button>
 				{/if}
 			</div>
 		</div>
 	</div>
-</button>
+</div>

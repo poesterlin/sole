@@ -12,7 +12,7 @@ describe.skipIf(!url)('playback settings with a fake Music Assistant', () => {
 		player: process.env.MA_PLAYER_NAME
 	};
 	let server: ReturnType<typeof Bun.serve>;
-	const plays: Array<{ queue_id: string }> = [];
+	const plays: Array<{ queue_id: string; option: string; media: string[] }> = [];
 	beforeAll(() => {
 		server = Bun.serve({
 			port: 0,
@@ -54,6 +54,7 @@ describe.skipIf(!url)('playback settings with a fake Music Assistant', () => {
 	});
 	beforeEach(async () => {
 		await client`DELETE FROM playback_settings`;
+		await client`DELETE FROM radio_sessions`;
 		plays.length = 0;
 	});
 	afterAll(async () => {
@@ -118,6 +119,59 @@ describe.skipIf(!url)('playback settings with a fake Music Assistant', () => {
 		expect((await PUT(event('session', 'missing'))).status).toBe(400);
 		const [row] = await client`SELECT player_id FROM playback_settings WHERE id = 1`;
 		expect(row.player_id).toBe('bedroom');
+	});
+
+	test('radio status survives restart and appending does not disable the session', async () => {
+		await client`INSERT INTO radio_sessions
+			(queue_id, player_id, enabled, cluster_ids, seed_uris, recent_uris, queue_item_ids)
+			VALUES ('queue_kitchen', 'kitchen', true, '[1]', '["seed"]', '["recent"]', '["occurrence"]')`;
+		const { playQueueUris, getPlayerState } = await import('./player');
+		await playQueueUris('queue_kitchen', ['test://track/2'], 'add');
+		expect(plays[0]).toEqual({
+			queue_id: 'queue_kitchen',
+			media: ['test://track/2'],
+			option: 'add'
+		});
+		expect((await getPlayerState())?.radio?.enabled).toBe(true);
+		const restarted = Bun.spawnSync(
+			[
+				process.execPath,
+				'--no-env-file',
+				'-e',
+				'import { getRadioSession } from "./src/lib/server/radio-store"; const s = await getRadioSession("queue_kitchen"); console.log(JSON.stringify({ enabled: s?.enabled, recentUris: s?.recentUris })); process.exit(0);'
+			],
+			{ env: { ...process.env, DATABASE_URL: url! }, cwd: process.cwd() }
+		);
+		expect(restarted.exitCode).toBe(0);
+		expect(JSON.parse(restarted.stdout.toString())).toEqual({
+			enabled: true,
+			recentUris: ['recent']
+		});
+	});
+
+	test('replacing playback disables radio only on the target queue', async () => {
+		for (const player of ['kitchen', 'bedroom']) {
+			await client`INSERT INTO radio_sessions
+				(queue_id, player_id, enabled, cluster_ids, seed_uris, recent_uris, queue_item_ids)
+				VALUES (${'queue_' + player}, ${player}, true, '[1]', '[]', '[]', '[]')`;
+		}
+		const { playUris } = await import('./player');
+		const { getRadioSession } = await import('./radio-store');
+		await playUris(['test://track/3'], { playerId: 'bedroom' });
+		expect(plays[0].option).toBe('replace');
+		expect((await getRadioSession('queue_bedroom'))?.enabled).toBe(false);
+		expect((await getRadioSession('queue_kitchen'))?.enabled).toBe(true);
+	});
+
+	test('stop radio preserves playback and queue contents', async () => {
+		await client`INSERT INTO radio_sessions
+			(queue_id, player_id, enabled, cluster_ids, seed_uris, recent_uris, queue_item_ids)
+			VALUES ('queue_kitchen', 'kitchen', true, '[1]', '[]', '["recent"]', '[]')`;
+		const { stopRadio } = await import('./radio');
+		const { getRadioSession } = await import('./radio-store');
+		await stopRadio('queue_kitchen');
+		expect((await getRadioSession('queue_kitchen'))?.enabled).toBe(false);
+		expect(plays).toHaveLength(0);
 	});
 
 	test('playback query rejects unknown, blank, and duplicate targets without sending playback', async () => {

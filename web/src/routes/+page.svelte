@@ -41,9 +41,9 @@
 		if (startingVibe !== null) return;
 		startingVibe = clusterId;
 		try {
-			const { ok } = await post('/api/play-vibe', { clusterIds: [clusterId] });
+			const { ok } = await post('/api/play-vibe', { clusterIds: [clusterId], continuous: true });
 			if (ok) {
-				toastStore.show(`Playing ${data.clusterNames[clusterId] ?? `Cluster ${clusterId}`}`);
+				toastStore.show(`Radio started ∞ · ${data.clusterNames[clusterId] ?? `Cluster ${clusterId}`}`);
 				await Promise.all([refreshQueues(), nowPlayingStore.refresh()]);
 			}
 		} finally {
@@ -72,6 +72,17 @@
 
 	async function likeTrackFromQueue(uri: string, name?: string) {
 		await likeTrack(uri, name);
+	}
+
+	let stoppingRadio = $state<string | null>(null);
+	async function stopQueueRadio(queueId: string) {
+		if (stoppingRadio !== null) return;
+		stoppingRadio = queueId;
+		try {
+			const { ok } = await post('/api/radio', { queueId });
+			toastStore.show(ok ? 'Radio stopped. Queued tracks will keep playing.' : 'Could not stop radio.');
+			await refreshQueues();
+		} finally { stoppingRadio = null; }
 	}
 
 	async function playQueuedTrack(
@@ -266,6 +277,14 @@
 							</span>
 						</div>
 
+						{#if queue.radio?.enabled}
+							<div class="mt-3 flex items-center justify-between gap-3 text-sm">
+								<span class="text-moss font-bold">∞ Continuous ON</span>
+								<button class="rounded-full px-3 py-1.5 text-xs font-bold hover:bg-black/5 disabled:opacity-40"
+									disabled={stoppingRadio !== null} onclick={() => stopQueueRadio(queue.queueId)}>Stop radio</button>
+							</div>
+						{/if}
+						{#if queue.radio?.message}<p class="mt-2 text-sm" role="status">{queue.radio.message}</p>{/if}
 						<div class="bg-ink/[0.045] mt-4 rounded-xl px-3 py-2.5">
 							<p class="text-faded text-[10px] font-bold tracking-[0.2em] uppercase">
 								{queue.state === 'playing' ? 'Now playing' : 'Current track'}

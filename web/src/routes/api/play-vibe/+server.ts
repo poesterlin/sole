@@ -2,6 +2,7 @@ import { and, eq, inArray, sql } from 'drizzle-orm';
 import { db } from '$lib/server/db';
 import { likedSongsTable, trackTable } from '$lib/server/schema';
 import { getActiveClusterMetadata } from '$lib/server/active-clusters';
+import { getClusterCovers } from '$lib/server/cover-image';
 import { recommend, validateTrackUris } from '$lib/server/recomendation-engine';
 import {
 	getActiveSchedule,
@@ -13,19 +14,29 @@ import {
 import { playSongs } from '$lib/server/webhook';
 import { InvalidPlaybackPlayerError, validatePlaybackPlayer } from '$lib/server/player';
 import type { RequestHandler } from './$types';
+import { startRadio } from '$lib/server/radio';
 
 export const GET: RequestHandler = async () => {
-	const [clusterIds, schedules, active, clusterMetadata] = await Promise.all([
+	const [clusterIds, schedules, active, clusterMetadata, allCovers] = await Promise.all([
 		getVibeClusterIds(),
 		listSchedules(),
 		getActiveSchedule(),
-		getActiveClusterMetadata()
+		getActiveClusterMetadata(),
+		getClusterCovers().catch(() => ({}) as Awaited<ReturnType<typeof getClusterCovers>>)
 	]);
+	// Only the covers a schedule or the saved picks can show, keyed by cluster.
+	const shown = new Set([...clusterIds, ...schedules.flatMap((slot) => slot.clusterIds)]);
+	const covers = Object.fromEntries(
+		Object.entries(allCovers)
+			.filter(([id]) => shown.has(Number(id)))
+			.map(([id, cover]) => [id, cover.primary])
+	);
 	return Response.json(
 		{
 			success: true,
 			clusterIds,
 			names: clusterMetadata.names,
+			covers,
 			schedules,
 			activeSchedule: active,
 			scheduleTimezone: Intl.DateTimeFormat().resolvedOptions().timeZone
@@ -44,6 +55,7 @@ export const POST: RequestHandler = async ({ request }) => {
 			useSchedule?: boolean;
 			saveOnly?: boolean;
 			scheduleId?: number;
+			continuous?: boolean;
 		};
 		let clusterIds: number[];
 		if (body.scheduleId !== undefined) {
@@ -81,6 +93,15 @@ export const POST: RequestHandler = async ({ request }) => {
 			.where(and(inArray(trackTable.clusterId, clusterIds), eq(trackTable.skip, false)))
 			.orderBy(sql`random()`)
 			.limit(5);
+
+		if (body.continuous === true) {
+			const tracks = await startRadio(
+				clusterIds,
+				seeds.map((seed) => seed.uri),
+				playerId
+			);
+			return Response.json({ success: true, tracks, continuous: true });
+		}
 
 		const recommendations = await recommend({
 			seedUris: seeds.map((s) => s.uri),

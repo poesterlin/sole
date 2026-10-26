@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
+	import { onMount, untrack } from 'svelte';
 	import { IconCheck, IconPlayerPlayFilled, IconWand, IconX } from '@tabler/icons-svelte';
 	import TrackList from '$lib/components/TrackList.svelte';
 	import { coverUrl } from '$lib/cover-image';
@@ -37,6 +37,21 @@
 	let draft = $state(untrack(() => currentName));
 	let named = $state(false);
 	let suggested = $state<string | null>(null);
+
+	onMount(() => {
+		// A desktop page still scrolls behind a fixed drawer unless the body is
+		// pinned, and Escape should close the panel the way it closes a dialog.
+		const previousOverflow = document.body.style.overflow;
+		document.body.style.overflow = 'hidden';
+		const onKeydown = (event: KeyboardEvent) => {
+			if (event.key === 'Escape') onclose();
+		};
+		window.addEventListener('keydown', onKeydown);
+		return () => {
+			document.body.style.overflow = previousOverflow;
+			window.removeEventListener('keydown', onKeydown);
+		};
+	});
 
 	$effect(() => {
 		const id = clusterId;
@@ -143,13 +158,13 @@
 </script>
 
 <div
-	class="border-ink/10 bg-cream fixed inset-0 z-50 flex justify-end backdrop-blur-sm"
+	class="bg-ink/45 fixed inset-0 z-50 flex justify-end backdrop-blur-sm"
 	role="presentation"
 	onclick={(e) => e.currentTarget === e.target && onclose()}
 >
 	<aside
-		class="border-ink/10 flex h-full w-full max-w-lg flex-col overflow-y-auto border-l shadow-2xl"
-		aria-label="Cluster naming"
+		class="border-ink/10 bg-cream flex h-full w-full max-w-lg flex-col overflow-y-auto border-l shadow-2xl sm:my-3 sm:mr-3 sm:h-[calc(100%-1.5rem)] sm:max-w-xl sm:rounded-2xl sm:border lg:max-w-2xl"
+		aria-label="Cluster details"
 	>
 		<header class="border-ink/10 bg-cream/95 sticky top-0 z-10 border-b px-6 py-4 backdrop-blur">
 			<div class="flex items-start justify-between gap-3">

@@ -1,4 +1,4 @@
-import { desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import { CLUSTER_NAMES } from '$lib/clusters';
 import { db } from './db';
 import { clusterRunTable, clusterNameTable } from './schema';
@@ -31,6 +31,30 @@ export async function getActiveRunId(): Promise<number | null> {
 		.orderBy(sql`${clusterRunTable.appliedAt} DESC NULLS LAST`, desc(clusterRunTable.id))
 		.limit(1);
 	return row?.id ?? null;
+}
+
+/**
+ * One cluster's current display name, for callers that know the id but not the
+ * full metadata (the now-playing snapshot). Falls back the same way the Browse
+ * grid does: a stored name, then the legacy map when no run has been applied.
+ */
+export async function getClusterName(clusterId: number): Promise<string> {
+	try {
+		const runId = await getActiveRunId();
+		if (runId !== null) {
+			const [row] = await db
+				.select({ displayName: clusterNameTable.displayName })
+				.from(clusterNameTable)
+				.where(
+					and(eq(clusterNameTable.runId, runId), eq(clusterNameTable.clusterId, clusterId))
+				)
+				.limit(1);
+			return row?.displayName.trim() || `Cluster ${clusterId}`;
+		}
+	} catch {
+		// A missing name must never take playback state down with it.
+	}
+	return CLUSTER_NAMES[clusterId] ?? `Cluster ${clusterId}`;
 }
 
 export async function getActiveClusterMetadata(): Promise<ActiveClusterMetadata> {
