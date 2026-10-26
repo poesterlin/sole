@@ -114,6 +114,11 @@ The worker uses `64` for usage errors so callers can distinguish them from bound
 
 ## Profiling
 
+For a matched-audio comparison of actual OpenL3 and Music Assistant's Microsoft
+CLAP outputs, see [the model comparison harness](compare-models.md). It saves
+embeddings, nearest-song matches, rank agreement, and optional CLAP text search
+in an isolated experiment directory.
+
 The `PROFILE` JSON line reports count, total, mean, median, 95th percentile,
 and maximum stage time. Per-track events report timings before the batch summary.
 Stage names include:
