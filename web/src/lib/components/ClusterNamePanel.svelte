@@ -250,10 +250,14 @@
 							</p>
 							<div class="mt-2 flex flex-wrap gap-1.5">
 								{#each evidence.artists as artist (artist.name)}
-									<span class="bg-ink/5 text-ink-soft rounded-full px-2.5 py-1 text-xs">
+									<a
+										href={`/vibe?tab=artists&artist=${encodeURIComponent(artist.name)}`}
+										class="bg-ink/5 text-ink-soft hover:bg-ink/10 hover:text-ink rounded-full px-2.5 py-1 text-xs transition"
+										title={`See where ${artist.name} lands across your vibes`}
+									>
 										{artist.name}
 										<span class="text-faded tabular-nums">{artist.count}</span>
-									</span>
+									</a>
 								{/each}
 							</div>
 						</div>
