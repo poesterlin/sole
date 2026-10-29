@@ -4,6 +4,7 @@
 	import { page } from '$app/state';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import ClusterBrowser from '$lib/components/ClusterBrowser.svelte';
+	import ArtistExplorer from '$lib/components/ArtistExplorer.svelte';
 	import VibeScheduleEditor from '$lib/components/VibeScheduleEditor.svelte';
 	import { toastStore } from '$lib/client/toast.svelte';
 	import { post } from '$lib/api';
@@ -11,10 +12,12 @@
 
 	let { data } = $props();
 
-	type Tab = 'mix' | 'browse' | 'schedule';
+	type Tab = 'mix' | 'browse' | 'artists' | 'schedule';
 	let tab = $state<Tab>(untrack(() => {
 		const requested = page.url.searchParams.get('tab');
-		return requested === 'mix' || requested === 'schedule' ? requested : 'browse';
+		return requested === 'mix' || requested === 'artists' || requested === 'schedule'
+			? requested
+			: 'browse';
 	}));
 	// Browse is the default view, so a cluster link can point at the tab
 	// directly and still land on the right sleeve.
@@ -24,12 +27,20 @@
 		const parsed = Number(raw);
 		return Number.isInteger(parsed) && parsed >= 0 ? parsed : null;
 	});
+	// An artist link opens the Artists tab on that name.
+	const focusArtist = $derived(page.url.searchParams.get('artist'));
 
 	// Links elsewhere on the site point at `?tab=browse&cluster=…`. SvelteKit
 	// keeps this component mounted, so honour a tab change on navigation too.
 	$effect(() => {
 		const requested = page.url.searchParams.get('tab');
-		if (requested === 'mix' || requested === 'browse' || requested === 'schedule') tab = requested;
+		if (
+			requested === 'mix' ||
+			requested === 'browse' ||
+			requested === 'artists' ||
+			requested === 'schedule'
+		)
+			tab = requested;
 	});
 
 	let vibeSelection = $state(new SvelteSet<number>(untrack(() => data.vibeClusterIds)));
@@ -46,6 +57,7 @@
 
 	const TABS: Array<{ id: Tab; label: string }> = [
 		{ id: 'browse', label: 'Browse' },
+		{ id: 'artists', label: 'Artists' },
 		{ id: 'mix', label: 'Mix' },
 		{ id: 'schedule', label: 'Schedule' }
 	];
@@ -118,7 +130,7 @@
 
 <PageHeader
 	title="Vibe"
-	description="Pick clusters, browse what they contain, or schedule them by time of day."
+	description="Pick clusters, browse what they contain, see where an artist lands, or schedule them by time of day."
 />
 
 <nav class="border-line mb-6 flex gap-1 border-b" aria-label="Vibe views">
@@ -217,6 +229,8 @@
 		namedIds={data.namedIds}
 		{focusClusterId}
 	/>
+{:else if tab === 'artists'}
+	<ArtistExplorer {focusArtist} />
 {:else}
 	<VibeScheduleEditor
 		bind:schedules

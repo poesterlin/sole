@@ -80,6 +80,25 @@ It leaves existing names unchanged. Click a **Vibe → Browse** tile to edit its
 Names belong to clustering generations. Rollback restores the earlier generation's names.
 See the [naming code](https://github.com/poesterlin/sole/blob/main/web/src/lib/server/cluster-naming.ts).
 
+## Artist distribution
+
+**Vibe → Artists** searches the library by artist name and shows where that act
+actually lands: one bar per vibe with its track count, plus tracks, albums, vibes
+touched, focus (share in the biggest cluster), spread (effective number of vibes)
+and evenness. Each bar links to the matching sleeve in **Vibe → Browse**, and the
+co-credited artists are clickable, so a duet leads to the other half.
+
+Pruned duplicates are excluded by default so the numbers describe what is
+playable; a checkbox counts them back in. Encoded as:
+
+| Request | Returns |
+|---|---|
+| `GET /api/artists?q=sad` | Matching artists with track and cluster counts. Omitting `q` lists the most represented artists. |
+| `GET /api/artist-stats?name=Sade` | Distribution plus the stats above. Add `includeSkipped=1` to count pruned duplicates. |
+
+Both routes use the session like the rest of the UI. Matching folds case, so
+`the beatles` and `The Beatles` are one artist.
+
 ## Duplicates
 
 **Manage → Duplicates** groups tracks by normalised title, first artist, and album.
