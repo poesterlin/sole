@@ -511,7 +511,7 @@ class SolePlayerCard extends HTMLElement {
 		this.shadowRoot.addEventListener('change', (event) => this._onChange(event));
 		this.shadowRoot.addEventListener('pointerdown', (event) => this._onPointerDown(event));
 		this.shadowRoot.addEventListener('pointerup', () => this._onPointerUp());
-		this.shadowRoot.addEventListener('pointercancel', () => this._onPointerUp());
+		this.shadowRoot.addEventListener('pointercancel', () => this._onPointerCancel());
 	}
 
 	static getStubConfig(hass) {
@@ -1154,6 +1154,18 @@ class SolePlayerCard extends HTMLElement {
 	}
 
 	_onPointerUp() {
+		// Do not re-render here: pointerup fires before the slider's change event,
+		// and rebuilding the DOM would detach the slider before volume_set is sent.
+		// _onChange clears the drag flag and the next hass update re-renders.
+		if (!this._draggingVolume) return;
+		setTimeout(() => {
+			if (!this._draggingVolume) return;
+			this._draggingVolume = false;
+			this._render(true);
+		}, 250);
+	}
+
+	_onPointerCancel() {
 		if (!this._draggingVolume) return;
 		this._draggingVolume = false;
 		this._render(true);

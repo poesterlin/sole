@@ -1,4 +1,4 @@
-import { and, eq, inArray, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNotNull, sql } from 'drizzle-orm';
 import { db } from '$lib/server/db';
 import { likedSongsTable, trackTable } from '$lib/server/schema';
 import { getActiveClusterMetadata } from '$lib/server/active-clusters';
@@ -15,6 +15,9 @@ import { playSongs } from '$lib/server/webhook';
 import { InvalidPlaybackPlayerError, validatePlaybackPlayer } from '$lib/server/player';
 import type { RequestHandler } from './$types';
 import { startRadio } from '$lib/server/radio';
+
+const SEED_COUNT = 5;
+const SEED_LIKED = 1;
 
 export const GET: RequestHandler = async () => {
 	const [clusterIds, schedules, active, clusterMetadata, allCovers] = await Promise.all([
@@ -85,14 +88,30 @@ export const POST: RequestHandler = async ({ request }) => {
 			return Response.json({ success: true, clusterIds, saved: true });
 		}
 
-		// Select 5 random tracks from these clusters as seeds
-		const seeds = await db
+		// Seeds anchor the session's taste. Seeding only from liked songs reuses the
+		// same few tracks every time, so every session landed on the same ~60 tracks;
+		// one liked anchor plus random cluster tracks keeps variety (see SEED_LIKED).
+		const clusterTracks = and(
+			inArray(trackTable.clusterId, clusterIds),
+			eq(trackTable.skip, false),
+			isNotNull(trackTable.embeddingCentered)
+		);
+		const liked = await db
 			.select({ uri: trackTable.uri })
 			.from(trackTable)
 			.innerJoin(likedSongsTable, eq(trackTable.uri, likedSongsTable.uri))
-			.where(and(inArray(trackTable.clusterId, clusterIds), eq(trackTable.skip, false)))
+			.where(clusterTracks)
 			.orderBy(sql`random()`)
-			.limit(5);
+			.limit(SEED_LIKED);
+		const random = await db
+			.select({ uri: trackTable.uri })
+			.from(trackTable)
+			.where(clusterTracks)
+			.orderBy(sql`random()`)
+			.limit(SEED_COUNT);
+		const seeds = [...new Set([...liked, ...random].map((seed) => seed.uri))]
+			.slice(0, SEED_COUNT)
+			.map((uri) => ({ uri }));
 
 		if (body.continuous === true) {
 			const tracks = await startRadio(
