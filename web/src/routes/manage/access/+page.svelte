@@ -5,13 +5,24 @@
 	import { IconClipboardCopy, IconKey } from '@tabler/icons-svelte';
 
 	let { data, form } = $props();
-	let copied = $state<'secret' | 'notebook' | null>(null);
+	let copied = $state<'secret' | 'notebook' | 'homeassistant' | null>(null);
 	let workerUrl = $state(
 		untrack(() =>
 			/^https?:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/.test(data.workerUrl) ? '' : data.workerUrl
 		)
 	);
+	let soleUrl = $state(
+		untrack(() =>
+			/^https?:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/.test(data.soleUrl) ? '' : data.soleUrl
+		)
+	);
 	const localWorkerUrl = $derived(/^https?:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/.test(workerUrl));
+	const localSoleUrl = $derived(
+		/^https?:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/.test(soleUrl.trim() || data.soleUrl)
+	);
+	const soleBase = $derived(
+		(soleUrl.trim() || 'https://your-recommender.example.com').replace(/\/+$/, '')
+	);
 
 	const workerCell = $derived(`import getpass
 import os
@@ -75,7 +86,52 @@ elif returncode == 64:
 else:
     raise subprocess.CalledProcessError(returncode, process.args)`);
 
-	async function copyText(value: string, kind: 'secret' | 'notebook') {
+	// Home Assistant can only use service credentials on the routes the guard
+	// allowlists: the playback POSTs. The browser routes under /track accept a
+	// session cookie alone, so a rest_command pointed at them lands on /login.
+	const homeAssistantCommands =
+		$derived(`# Home Assistant: secrets.yaml. The key is the only secret here.
+sole_playback_authorization: "Bearer REPLACE_WITH_YOUR_SOLE_PLAYBACK_KEY"
+
+# Home Assistant: configuration.yaml. Create an External playback key named
+# "Home Assistant" first. rest_command cannot join a base URL with a path, so
+# each command carries its full URL; edit the host in all four if Sole moves.
+rest_command:
+  sole_play_picks:
+    url: "${soleBase}/api/play-vibe"
+    method: POST
+    headers:
+      Authorization: !secret sole_playback_authorization
+    content_type: "application/json"
+    payload: "{}"
+    timeout: 120
+
+  sole_play_schedule:
+    url: "${soleBase}/api/play-vibe"
+    method: POST
+    headers:
+      Authorization: !secret sole_playback_authorization
+    content_type: "application/json"
+    payload: '{"useSchedule": true}'
+    timeout: 120
+
+  sole_like_track:
+    url: "${soleBase}/api/now-playing-track"
+    method: POST
+    headers:
+      Authorization: !secret sole_playback_authorization
+    content_type: "application/json"
+    payload: '{"action": "like"}'
+
+  sole_skip_track:
+    url: "${soleBase}/api/now-playing-track"
+    method: POST
+    headers:
+      Authorization: !secret sole_playback_authorization
+    content_type: "application/json"
+    payload: '{"action": "skip"}'`);
+
+	async function copyText(value: string, kind: 'secret' | 'notebook' | 'homeassistant') {
 		try {
 			await navigator.clipboard.writeText(value);
 			copied = kind;
@@ -294,5 +350,52 @@ else:
 	</div>
 	<pre class="bg-ink text-cream mt-5 overflow-x-auto rounded-xl p-4 text-xs leading-relaxed"><code
 			>{workerCell}</code
+		></pre>
+</section>
+
+<section class="border-ink/10 mt-6 rounded-2xl border bg-white/80 p-6 shadow-sm">
+	<div class="flex flex-wrap items-start justify-between gap-3">
+		<div>
+			<h2 class="text-lg font-bold">Home Assistant rest_command</h2>
+			<p class="text-ink-soft mt-1 max-w-2xl text-sm">
+				Copy these after creating an <strong>External playback</strong> key named
+				<em>Home Assistant</em>. They send the key in an <code>Authorization</code> header, which is
+				the only credential Home Assistant can use: the <code>/track/like</code> and
+				<code>/track/skip</code> pages require a signed-in browser session and answer with a login
+				redirect instead, so likes and perma-skips go through
+				<code>/api/now-playing-track</code>. Only the key is a secret; the URLs are plain
+				configuration, repeated per command because <code>rest_command</code> cannot join a base URL with
+				a path.
+			</p>
+		</div>
+		<div class="flex gap-2">
+			<button
+				class="bg-ink text-cream hover:bg-ink-soft inline-flex cursor-pointer items-center gap-1 rounded-lg px-3 py-2 text-xs font-bold"
+				type="button"
+				onclick={() => copyText(homeAssistantCommands, 'homeassistant')}
+			>
+				<IconClipboardCopy size={15} />
+				{copied === 'homeassistant' ? 'Copied' : 'Copy commands'}
+			</button>
+		</div>
+	</div>
+	<div class="mt-5 max-w-xl">
+		<label class="mb-1 block text-sm font-bold" for="sole-url">Sole URL</label>
+		<input
+			id="sole-url"
+			type="url"
+			placeholder="https://your-recommender.example.com"
+			bind:value={soleUrl}
+			class="border-ink/20 bg-paper w-full rounded-lg border px-3 py-2"
+		/>
+		<p class="text-ink-soft mt-1 text-xs">
+			The address Home Assistant reaches Sole at; it is written into the copied commands.
+		</p>
+		{#if localSoleUrl}<p class="mt-1 text-xs text-amber-800">
+				A localhost address reaches Home Assistant itself, not this computer.
+			</p>{/if}
+	</div>
+	<pre class="bg-ink text-cream mt-5 overflow-x-auto rounded-xl p-4 text-xs leading-relaxed"><code
+			>{homeAssistantCommands}</code
 		></pre>
 </section>

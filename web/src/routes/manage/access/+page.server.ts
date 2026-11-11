@@ -35,6 +35,7 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 	if (!locals.user) redirect(302, '/login?redirect=%2Fsettings');
 	return {
 		workerUrl: url.origin,
+		soleUrl: url.origin,
 		keys: (await listApiKeys(locals.user.id)).map(pageKey)
 	};
 };
